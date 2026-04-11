@@ -234,12 +234,69 @@ const server = Bun.serve({
       });
     }
     
+    // GET /help - API documentation
+    if (url.pathname === "/help") {
+      const helpText = `Sidetrack - Development Observability Sink
+Port: ${PORT} | Retention: 5 minutes
+
+ENDPOINTS
+=========
+
+POST /events
+  Ingest events (single object or array)
+  Body: { "_type": "custom.event", "data": "..." }
+
+GET /recent
+  Recent events in chronological order
+  Params:
+    ?limit=100        Max events to return (default: 100)
+    ?_type=X          Filter by event type (e.g., console.error, fetch.request)
+    ?_runtime=X       Filter by runtime (browser, node, bun, deno, worker)
+    ?anyField=value   Filter by any field in the event data
+
+GET /search?q=term
+  Full-text search across event data
+  Params:
+    ?q=searchterm     Search term (required)
+    ?limit=50         Max events to return (default: 50)
+
+GET /stats
+  Event count and time span
+  Returns: { count, oldest_at, newest_at, span_ms }
+
+GET /inject.js
+  Legacy browser inject script (use sidetrack-client instead)
+
+EVENT TYPES (from sidetrack-client)
+===================================
+console.log, console.warn, console.error, console.debug, console.info
+error.uncaught, error.unhandledrejection
+fetch.request, fetch.response, fetch.error
+xhr.request, xhr.response, xhr.error
+http.request, http.response, http.error
+async.init, async.before, async.after, async.destroy
+dom.click, dom.submit, dom.navigate, dom.visibility, dom.focus, dom.blur
+
+EXAMPLES
+========
+curl http://localhost:${PORT}/recent?limit=10
+curl http://localhost:${PORT}/recent?_type=console.error
+curl http://localhost:${PORT}/recent?_runtime=bun
+curl http://localhost:${PORT}/search?q=error
+curl http://localhost:${PORT}/stats
+`;
+      return new Response(helpText, { 
+        headers: { ...headers, "Content-Type": "text/plain" } 
+      });
+    }
+
     // GET / - health check
     if (url.pathname === "/") {
       return new Response(JSON.stringify({ 
         name: "6digit-sidetrack",
         status: "running",
-        port: PORT
+        port: PORT,
+        help: "GET /help for API documentation"
       }), { headers });
     }
     
