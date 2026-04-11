@@ -170,7 +170,7 @@ The developer's machine is powerful enough to handle a firehose of events. We ca
 - **Zero config** - Works immediately with sensible defaults
 - **5-minute retention** - Recent events only, keeps it fast
 - **No schema** - Any JSON goes in, query by any field
-- **Development only** - Not for production, not for metrics, just for debugging
+- **Development only** - Not for production, not for metrics - for traceability and visibility into running code
 
 ## Architecture
 
