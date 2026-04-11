@@ -32,10 +32,12 @@ db.run(`
     created_at INTEGER NOT NULL,
     message TEXT NOT NULL,
     url TEXT,
-    context TEXT
+    context TEXT,
+    status TEXT DEFAULT 'open'
   )
 `);
 db.run(`CREATE INDEX idx_feedback_created ON feedback(created_at)`);
+db.run(`CREATE INDEX idx_feedback_status ON feedback(status)`);
 
 // Prune old events periodically
 setInterval(() => {
@@ -110,20 +112,46 @@ function insertFeedback(message: string, url?: string, context?: unknown) {
 }
 
 // Get all feedback
-function getFeedback(limit = 100) {
-  const rows = db.query(`
-    SELECT id, created_at, message, url, context FROM feedback 
-    ORDER BY created_at DESC 
-    LIMIT ?
-  `).all(limit) as Array<{ id: number; created_at: number; message: string; url: string | null; context: string | null }>;
+function getFeedback(limit = 100, status?: string) {
+  let query = `SELECT id, created_at, message, url, context, status FROM feedback`;
+  const params: (number | string)[] = [];
+  
+  if (status) {
+    query += ` WHERE status = ?`;
+    params.push(status);
+  }
+  
+  query += ` ORDER BY created_at DESC LIMIT ?`;
+  params.push(limit);
+  
+  const rows = db.query(query).all(...params) as Array<{ 
+    id: number; 
+    created_at: number; 
+    message: string; 
+    url: string | null; 
+    context: string | null;
+    status: string;
+  }>;
   
   return rows.map(row => ({
     id: row.id,
     created_at: row.created_at,
     message: row.message,
     url: row.url,
-    context: row.context ? JSON.parse(row.context) : null
+    context: row.context ? JSON.parse(row.context) : null,
+    status: row.status
   })).reverse();
+}
+
+// Update feedback status
+function updateFeedbackStatus(id: number, status: string) {
+  const validStatuses = ['open', 'resolved', 'wontfix'];
+  if (!validStatuses.includes(status)) {
+    return { ok: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` };
+  }
+  
+  const result = db.run(`UPDATE feedback SET status = ? WHERE id = ?`, [status, id]);
+  return { ok: result.changes > 0 };
 }
 
 // Delete feedback by id
@@ -208,8 +236,43 @@ const server = Bun.serve({
     // GET /feedback - list all feedback
     if (req.method === "GET" && url.pathname === "/feedback") {
       const limit = parseInt(url.searchParams.get("limit") || "100");
-      const feedback = getFeedback(limit);
+      const status = url.searchParams.get("status") || undefined;
+      const feedback = getFeedback(limit, status);
       return new Response(JSON.stringify(feedback), { headers });
+    }
+    
+    // PATCH /feedback/:id - update feedback status
+    if (req.method === "PATCH" && url.pathname.startsWith("/feedback/")) {
+      const id = parseInt(url.pathname.split("/")[2]);
+      if (isNaN(id)) {
+        return new Response(JSON.stringify({ ok: false, error: 'invalid id' }), { 
+          status: 400, 
+          headers 
+        });
+      }
+      
+      try {
+        const body = await req.json();
+        const { status } = body as { status: string };
+        
+        if (!status) {
+          return new Response(JSON.stringify({ ok: false, error: 'status is required' }), { 
+            status: 400, 
+            headers 
+          });
+        }
+        
+        const result = updateFeedbackStatus(id, status);
+        if (!result.ok) {
+          return new Response(JSON.stringify(result), { status: 400, headers });
+        }
+        return new Response(JSON.stringify(result), { headers });
+      } catch (e) {
+        return new Response(JSON.stringify({ ok: false, error: String(e) }), { 
+          status: 400, 
+          headers 
+        });
+      }
     }
     
     // DELETE /feedback/:id - delete feedback
@@ -367,6 +430,12 @@ GET /feedback
   List all feedback
   Params:
     ?limit=100        Max items to return
+    ?status=open      Filter by status (open, resolved, wontfix)
+
+PATCH /feedback/:id
+  Update feedback status
+  Body: { "status": "resolved" }
+  Valid statuses: open, resolved, wontfix
 
 DELETE /feedback/:id
   Delete feedback by id

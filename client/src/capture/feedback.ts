@@ -22,6 +22,8 @@ export const DEFAULT_FEEDBACK_CONFIG: FeedbackConfig = {
   captureRecentEvents: 10,
 };
 
+const STORAGE_KEY = 'sidetrack-feedback-position';
+
 // Store recent events for context
 let recentEvents: unknown[] = [];
 const MAX_RECENT_EVENTS = 50;
@@ -35,6 +37,35 @@ export function addRecentEvent(event: unknown) {
 
 export function getRecentEvents(count: number): unknown[] {
   return recentEvents.slice(-count);
+}
+
+/**
+ * Load saved position from localStorage
+ */
+function loadPosition(): { x: number; y: number } | null {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const pos = JSON.parse(stored);
+      if (typeof pos.x === 'number' && typeof pos.y === 'number') {
+        return pos;
+      }
+    }
+  } catch {
+    // Ignore localStorage errors
+  }
+  return null;
+}
+
+/**
+ * Save position to localStorage
+ */
+function savePosition(x: number, y: number) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ x, y }));
+  } catch {
+    // Ignore localStorage errors
+  }
 }
 
 /**
@@ -101,7 +132,7 @@ function injectStyles() {
       background: #2563eb;
       color: white;
       border: none;
-      cursor: pointer;
+      cursor: grab;
       font-size: 18px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.2);
       z-index: 999998;
@@ -109,15 +140,18 @@ function injectStyles() {
       display: flex;
       align-items: center;
       justify-content: center;
+      user-select: none;
+      touch-action: none;
     }
     #sidetrack-feedback-btn:hover {
       transform: scale(1.1);
       background: #1d4ed8;
     }
-    #sidetrack-feedback-btn.bottom-right { bottom: 20px; right: 20px; }
-    #sidetrack-feedback-btn.bottom-left { bottom: 20px; left: 20px; }
-    #sidetrack-feedback-btn.top-right { top: 20px; right: 20px; }
-    #sidetrack-feedback-btn.top-left { top: 20px; left: 20px; }
+    #sidetrack-feedback-btn.dragging {
+      cursor: grabbing;
+      transform: scale(1.15);
+      transition: none;
+    }
     
     #sidetrack-feedback-modal {
       position: fixed;
@@ -131,10 +165,6 @@ function injectStyles() {
       display: none;
     }
     #sidetrack-feedback-modal.visible { display: block; }
-    #sidetrack-feedback-modal.bottom-right { bottom: 70px; right: 20px; }
-    #sidetrack-feedback-modal.bottom-left { bottom: 70px; left: 20px; }
-    #sidetrack-feedback-modal.top-right { top: 70px; right: 20px; }
-    #sidetrack-feedback-modal.top-left { top: 70px; left: 20px; }
     
     #sidetrack-feedback-modal header {
       padding: 12px 16px;
@@ -238,14 +268,12 @@ function createWidget(config: FeedbackConfig, endpoint: string) {
   // Button
   const btn = document.createElement('button');
   btn.id = 'sidetrack-feedback-btn';
-  btn.className = config.position;
   btn.innerHTML = '?';
-  btn.title = `Send feedback (${config.hotkey})`;
+  btn.title = `Send feedback (${config.hotkey}) - drag to reposition`;
   
   // Modal
   const modal = document.createElement('div');
   modal.id = 'sidetrack-feedback-modal';
-  modal.className = config.position;
   modal.innerHTML = `
     <header>
       <span>Quick Feedback</span>
@@ -270,6 +298,36 @@ function createWidget(config: FeedbackConfig, endpoint: string) {
   document.body.appendChild(modal);
   document.body.appendChild(toast);
   
+  // Position the button
+  const savedPos = loadPosition();
+  if (savedPos) {
+    // Use saved position
+    btn.style.left = `${savedPos.x}px`;
+    btn.style.top = `${savedPos.y}px`;
+    btn.style.right = 'auto';
+    btn.style.bottom = 'auto';
+  } else {
+    // Use default position from config
+    switch (config.position) {
+      case 'bottom-right':
+        btn.style.bottom = '20px';
+        btn.style.right = '20px';
+        break;
+      case 'bottom-left':
+        btn.style.bottom = '20px';
+        btn.style.left = '20px';
+        break;
+      case 'top-right':
+        btn.style.top = '20px';
+        btn.style.right = '20px';
+        break;
+      case 'top-left':
+        btn.style.top = '20px';
+        btn.style.left = '20px';
+        break;
+    }
+  }
+  
   // Elements
   const closeBtn = modal.querySelector('header button') as HTMLButtonElement;
   const textarea = modal.querySelector('textarea') as HTMLTextAreaElement;
@@ -278,9 +336,46 @@ function createWidget(config: FeedbackConfig, endpoint: string) {
   
   // State
   let isOpen = false;
+  let isDragging = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let btnStartX = 0;
+  let btnStartY = 0;
+  let hasDragged = false;
+  
+  function updateModalPosition() {
+    const btnRect = btn.getBoundingClientRect();
+    const modalWidth = 320;
+    const modalHeight = 250; // approximate
+    const padding = 10;
+    
+    // Determine best position for modal relative to button
+    let left = btnRect.left;
+    let top = btnRect.bottom + padding;
+    
+    // If modal would go off right edge, align to right of button
+    if (left + modalWidth > window.innerWidth - padding) {
+      left = btnRect.right - modalWidth;
+    }
+    
+    // If modal would go off bottom, show above button
+    if (top + modalHeight > window.innerHeight - padding) {
+      top = btnRect.top - modalHeight - padding;
+    }
+    
+    // Clamp to viewport
+    left = Math.max(padding, Math.min(left, window.innerWidth - modalWidth - padding));
+    top = Math.max(padding, Math.min(top, window.innerHeight - modalHeight - padding));
+    
+    modal.style.left = `${left}px`;
+    modal.style.top = `${top}px`;
+    modal.style.right = 'auto';
+    modal.style.bottom = 'auto';
+  }
   
   function open() {
     isOpen = true;
+    updateModalPosition();
     modal.classList.add('visible');
     textarea.value = '';
     textarea.focus();
@@ -342,8 +437,89 @@ function createWidget(config: FeedbackConfig, endpoint: string) {
     }
   }
   
-  // Event listeners
-  btn.addEventListener('click', () => isOpen ? close() : open());
+  // Drag handling
+  function onDragStart(e: MouseEvent | TouchEvent) {
+    isDragging = true;
+    hasDragged = false;
+    btn.classList.add('dragging');
+    
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    
+    dragStartX = clientX;
+    dragStartY = clientY;
+    
+    const rect = btn.getBoundingClientRect();
+    btnStartX = rect.left;
+    btnStartY = rect.top;
+    
+    e.preventDefault();
+  }
+  
+  function onDragMove(e: MouseEvent | TouchEvent) {
+    if (!isDragging) return;
+    
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    
+    const deltaX = clientX - dragStartX;
+    const deltaY = clientY - dragStartY;
+    
+    // Consider it a drag if moved more than 5px
+    if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+      hasDragged = true;
+    }
+    
+    let newX = btnStartX + deltaX;
+    let newY = btnStartY + deltaY;
+    
+    // Clamp to viewport
+    const btnSize = 40;
+    newX = Math.max(0, Math.min(newX, window.innerWidth - btnSize));
+    newY = Math.max(0, Math.min(newY, window.innerHeight - btnSize));
+    
+    btn.style.left = `${newX}px`;
+    btn.style.top = `${newY}px`;
+    btn.style.right = 'auto';
+    btn.style.bottom = 'auto';
+    
+    // Update modal position if open
+    if (isOpen) {
+      updateModalPosition();
+    }
+  }
+  
+  function onDragEnd() {
+    if (!isDragging) return;
+    
+    isDragging = false;
+    btn.classList.remove('dragging');
+    
+    // Save position
+    const rect = btn.getBoundingClientRect();
+    savePosition(rect.left, rect.top);
+  }
+  
+  // Mouse drag events
+  btn.addEventListener('mousedown', onDragStart);
+  document.addEventListener('mousemove', onDragMove);
+  document.addEventListener('mouseup', onDragEnd);
+  
+  // Touch drag events
+  btn.addEventListener('touchstart', onDragStart, { passive: false });
+  document.addEventListener('touchmove', onDragMove, { passive: false });
+  document.addEventListener('touchend', onDragEnd);
+  
+  // Click to open (only if not dragged)
+  btn.addEventListener('click', (e) => {
+    if (hasDragged) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    isOpen ? close() : open();
+  });
+  
   closeBtn.addEventListener('click', close);
   cancelBtn.addEventListener('click', close);
   submitBtn.addEventListener('click', submit);
