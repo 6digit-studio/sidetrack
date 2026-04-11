@@ -35,11 +35,12 @@ bun run index.ts
 
 ```bash
 # In your project
-bun link @6digit/sidetrack
+npm install @6digit/sidetrack-client
+# or: bun add @6digit/sidetrack-client
 ```
 
 ```typescript
-import { init } from '@6digit/sidetrack'
+import { init } from '@6digit/sidetrack-client'
 
 init()  // That's it. Everything is now captured.
 ```
@@ -232,15 +233,15 @@ bun run start
 
 ```bash
 # npm
-npm install @6digit/sidetrack
+npm install @6digit/sidetrack-client
 
 # bun
-bun add @6digit/sidetrack
+bun add @6digit/sidetrack-client
 ```
 
 Then in your app:
 ```typescript
-import { init } from '@6digit/sidetrack'
+import { init } from '@6digit/sidetrack-client'
 init()
 ```
 
