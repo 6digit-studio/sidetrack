@@ -28,6 +28,9 @@ import { captureFeedback, addRecentEvent } from './capture/feedback';
 export type { Config, Runtime, Capabilities, FeedbackConfig } from './types';
 export { detectRuntime, getCapabilities } from './runtime';
 
+// Track current instance for idempotent init
+let currentInstance: SidetrackInstance | null = null;
+
 export interface SidetrackInstance {
   /** Manually flush buffered events to the server */
   flush(): Promise<void>;
@@ -42,10 +45,18 @@ export interface SidetrackInstance {
 /**
  * Initialize sidetrack observability capture
  * 
+ * Idempotent: if already initialized, the existing instance is destroyed
+ * and a new one is created. This handles hot reload gracefully.
+ * 
  * @param userConfig - Optional configuration overrides
  * @returns SidetrackInstance with flush() and destroy() methods
  */
 export function init(userConfig: Partial<Config> = {}): SidetrackInstance {
+  // Clean up existing instance (handles hot reload)
+  if (currentInstance) {
+    currentInstance.destroy();
+    currentInstance = null;
+  }
   // Merge config with defaults
   const config: Config = {
     ...DEFAULT_CONFIG,
@@ -114,7 +125,7 @@ export function init(userConfig: Partial<Config> = {}): SidetrackInstance {
   // Log init (will be captured by console capture if enabled)
   console.debug(`[sidetrack] Initialized (${runtime}, ${modules.length} capture modules)`);
   
-  return {
+  const instance: SidetrackInstance = {
     runtime,
     capabilities: caps,
     
@@ -132,9 +143,17 @@ export function init(userConfig: Partial<Config> = {}): SidetrackInstance {
       // Destroy transport (final flush)
       transport.destroy();
       
+      // Clear current instance reference
+      if (currentInstance === instance) {
+        currentInstance = null;
+      }
+      
       console.debug('[sidetrack] Destroyed');
     },
   };
+  
+  currentInstance = instance;
+  return instance;
 }
 
 // Default export for convenience
