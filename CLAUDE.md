@@ -1,111 +1,68 @@
----
-description: Use Bun instead of Node.js, npm, pnpm, or vite.
-globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
-alwaysApply: false
----
+# 6digit-sidetrack
 
-Default to using Bun instead of Node.js.
+Development observability sink for AI-assisted development.
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+## What This Is
 
-## APIs
+A local HTTP server that captures structured events from browsers, satellites, and any other source. Stores the last 5 minutes in-memory. Queryable via HTTP.
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
+The core insight: **Dumb ingest, smart query.** No schema, no filtering at capture time. Just swallow everything, query it later.
 
-## Testing
+## Commands
 
-Use `bun test` to run tests.
+```bash
+# Start the server
+bun run index.ts
 
-```ts#index.test.ts
-import { test, expect } from "bun:test";
-
-test("hello world", () => {
-  expect(1).toBe(1);
-});
+# Or with hot reload during development
+bun --hot index.ts
 ```
 
-## Frontend
+## Architecture
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
+- **Port**: 6274
+- **Storage**: In-memory SQLite via `bun:sqlite`
+- **Retention**: 5 minutes, auto-pruned every 30 seconds
 
-Server:
+## Endpoints
 
-```ts#index.ts
-import index from "./index.html"
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/events` | POST | Ingest single event or array of events |
+| `/recent` | GET | Query recent events, optional `?limit=N&field=value` |
+| `/search` | GET | Search event data `?q=term&limit=N` |
+| `/stats` | GET | Event count and time span |
+| `/inject.js` | GET | Browser client script |
 
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
+## Browser Integration
+
+The server serves a self-contained browser client at `/inject.js`. It:
+- Hooks all console methods
+- Captures unhandled errors
+- Batches and flushes every second
+- Includes URL and page title
+
+To use in any web app:
+```html
+<script src="http://localhost:6274/inject.js"></script>
 ```
 
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
+## Querying (for AI assistants)
 
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
+```bash
+# Recent events
+curl http://localhost:6274/recent?limit=20
+
+# Filter by field
+curl "http://localhost:6274/recent?type=console.error"
+
+# Search
+curl "http://localhost:6274/search?q=notableActions"
 ```
 
-With the following `frontend.tsx`:
+## Using Bun
 
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
-
-// import .css files directly and it works
-import './index.css';
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
-
-```sh
-bun --hot ./index.ts
-```
-
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+This project uses Bun. Key patterns:
+- `bun:sqlite` for database
+- `Bun.serve()` for HTTP server
+- No external dependencies for core functionality

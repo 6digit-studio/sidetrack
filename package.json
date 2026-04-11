@@ -1,8 +1,14 @@
 {
   "name": "6digit-sidetrack",
+  "version": "0.1.0",
+  "description": "Development observability sink for AI-assisted development",
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "start": "bun run index.ts",
+    "dev": "bun --hot index.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
