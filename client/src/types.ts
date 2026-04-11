@@ -12,6 +12,14 @@ export interface Capabilities {
   httpModule: boolean;
 }
 
+export interface FeedbackConfig {
+  enabled: boolean;
+  position: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
+  hotkey: string;
+  captureDOM: boolean;
+  captureRecentEvents: number;
+}
+
 export interface Config {
   endpoint: string;
   flushInterval: number;
@@ -28,7 +36,16 @@ export interface Config {
     captureHeaders: boolean;
   };
   tags: Record<string, string>;
+  feedback: FeedbackConfig | boolean;
 }
+
+export const DEFAULT_FEEDBACK_CONFIG: FeedbackConfig = {
+  enabled: true,
+  position: 'bottom-right',
+  hotkey: 'ctrl+shift+f',
+  captureDOM: true,
+  captureRecentEvents: 10,
+};
 
 export const DEFAULT_CONFIG: Config = {
   endpoint: 'http://localhost:6274/events',
@@ -46,6 +63,7 @@ export const DEFAULT_CONFIG: Config = {
     captureHeaders: true,
   },
   tags: {},
+  feedback: true,  // enabled by default in browser
 };
 
 // Base event envelope

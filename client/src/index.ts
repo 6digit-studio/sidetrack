@@ -14,8 +14,8 @@
  *   sidetrack.destroy()
  */
 
-import type { Config, CaptureModule } from './types';
-import { DEFAULT_CONFIG } from './types';
+import type { Config, CaptureModule, FeedbackConfig } from './types';
+import { DEFAULT_CONFIG, DEFAULT_FEEDBACK_CONFIG } from './types';
 import { detectRuntime, getCapabilities } from './runtime';
 import { createTransport } from './transport';
 import { captureConsole } from './capture/console';
@@ -23,8 +23,9 @@ import { captureErrors } from './capture/errors';
 import { captureNetwork } from './capture/network';
 import { captureAsync } from './capture/async';
 import { captureDom } from './capture/dom';
+import { captureFeedback, addRecentEvent } from './capture/feedback';
 
-export type { Config, Runtime, Capabilities } from './types';
+export type { Config, Runtime, Capabilities, FeedbackConfig } from './types';
 export { detectRuntime, getCapabilities } from './runtime';
 
 export interface SidetrackInstance {
@@ -61,7 +62,16 @@ export function init(userConfig: Partial<Config> = {}): SidetrackInstance {
       ...DEFAULT_CONFIG.tags,
       ...userConfig.tags,
     },
+    feedback: userConfig.feedback ?? DEFAULT_CONFIG.feedback,
   };
+  
+  // Resolve feedback config
+  let feedbackConfig: FeedbackConfig;
+  if (typeof config.feedback === 'boolean') {
+    feedbackConfig = { ...DEFAULT_FEEDBACK_CONFIG, enabled: config.feedback };
+  } else {
+    feedbackConfig = { ...DEFAULT_FEEDBACK_CONFIG, ...config.feedback };
+  }
   
   const runtime = detectRuntime();
   const caps = getCapabilities();
@@ -88,6 +98,18 @@ export function init(userConfig: Partial<Config> = {}): SidetrackInstance {
   if (config.capture.dom && caps.dom) {
     modules.push(captureDom(transport));
   }
+  
+  // Feedback widget (browser only)
+  if (caps.dom && feedbackConfig.enabled) {
+    modules.push(captureFeedback(config, feedbackConfig));
+  }
+  
+  // Hook transport to feed recent events to feedback context
+  const originalSend = transport.send.bind(transport);
+  transport.send = (event) => {
+    addRecentEvent(event);
+    originalSend(event);
+  };
   
   // Log init (will be captured by console capture if enabled)
   console.debug(`[sidetrack] Initialized (${runtime}, ${modules.length} capture modules)`);

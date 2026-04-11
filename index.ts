@@ -25,6 +25,18 @@ db.run(`
 `);
 db.run(`CREATE INDEX idx_received_at ON events(received_at)`);
 
+// Feedback table - persistent, no pruning
+db.run(`
+  CREATE TABLE feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    url TEXT,
+    context TEXT
+  )
+`);
+db.run(`CREATE INDEX idx_feedback_created ON feedback(created_at)`);
+
 // Prune old events periodically
 setInterval(() => {
   const cutoff = Date.now() - MAX_AGE_MS;
@@ -86,6 +98,40 @@ function searchEvents(query: string, limit = 50) {
   })).reverse();
 }
 
+// Insert feedback
+function insertFeedback(message: string, url?: string, context?: unknown) {
+  const now = Date.now();
+  const contextJson = context ? JSON.stringify(context) : null;
+  const result = db.run(
+    `INSERT INTO feedback (created_at, message, url, context) VALUES (?, ?, ?, ?)`,
+    [now, message, url || null, contextJson]
+  );
+  return result.lastInsertRowid;
+}
+
+// Get all feedback
+function getFeedback(limit = 100) {
+  const rows = db.query(`
+    SELECT id, created_at, message, url, context FROM feedback 
+    ORDER BY created_at DESC 
+    LIMIT ?
+  `).all(limit) as Array<{ id: number; created_at: number; message: string; url: string | null; context: string | null }>;
+  
+  return rows.map(row => ({
+    id: row.id,
+    created_at: row.created_at,
+    message: row.message,
+    url: row.url,
+    context: row.context ? JSON.parse(row.context) : null
+  })).reverse();
+}
+
+// Delete feedback by id
+function deleteFeedback(id: number) {
+  const result = db.run(`DELETE FROM feedback WHERE id = ?`, [id]);
+  return result.changes > 0;
+}
+
 // HTTP Server
 const server = Bun.serve({
   port: PORT,
@@ -134,6 +180,49 @@ const server = Bun.serve({
       const limit = parseInt(url.searchParams.get("limit") || "50");
       const events = searchEvents(query, limit);
       return new Response(JSON.stringify(events), { headers });
+    }
+    
+    // POST /feedback - submit feedback
+    if (req.method === "POST" && url.pathname === "/feedback") {
+      try {
+        const body = await req.json();
+        const { message, url: pageUrl, context } = body as { message: string; url?: string; context?: unknown };
+        
+        if (!message || typeof message !== 'string') {
+          return new Response(JSON.stringify({ ok: false, error: 'message is required' }), { 
+            status: 400, 
+            headers 
+          });
+        }
+        
+        const id = insertFeedback(message, pageUrl, context);
+        return new Response(JSON.stringify({ ok: true, id }), { headers });
+      } catch (e) {
+        return new Response(JSON.stringify({ ok: false, error: String(e) }), { 
+          status: 400, 
+          headers 
+        });
+      }
+    }
+    
+    // GET /feedback - list all feedback
+    if (req.method === "GET" && url.pathname === "/feedback") {
+      const limit = parseInt(url.searchParams.get("limit") || "100");
+      const feedback = getFeedback(limit);
+      return new Response(JSON.stringify(feedback), { headers });
+    }
+    
+    // DELETE /feedback/:id - delete feedback
+    if (req.method === "DELETE" && url.pathname.startsWith("/feedback/")) {
+      const id = parseInt(url.pathname.split("/")[2]);
+      if (isNaN(id)) {
+        return new Response(JSON.stringify({ ok: false, error: 'invalid id' }), { 
+          status: 400, 
+          headers 
+        });
+      }
+      const deleted = deleteFeedback(id);
+      return new Response(JSON.stringify({ ok: deleted }), { headers });
     }
     
     // GET /stats - basic stats
@@ -266,6 +355,21 @@ GET /stats
 
 GET /inject.js
   Legacy browser inject script (use sidetrack-client instead)
+
+FEEDBACK (persistent, not pruned)
+=================================
+
+POST /feedback
+  Submit feedback with context
+  Body: { "message": "text", "url": "...", "context": {...} }
+
+GET /feedback
+  List all feedback
+  Params:
+    ?limit=100        Max items to return
+
+DELETE /feedback/:id
+  Delete feedback by id
 
 EVENT TYPES (from sidetrack-client)
 ===================================
