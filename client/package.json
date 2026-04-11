@@ -1,9 +1,39 @@
 {
   "name": "@6digit/sidetrack-client",
-  "private": true,
+  "version": "0.1.1",
+  "description": "Development observability client - captures console, network, errors, and more",
   "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "browser": "./dist/sidetrack.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    },
+    "./browser": "./dist/sidetrack.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "bun run build.ts"
+  },
+  "keywords": [
+    "observability",
+    "debugging",
+    "development",
+    "logging",
+    "devtools"
+  ],
+  "author": "6digit",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/6digit-studio/sidetrack.git",
+    "directory": "client"
   },
   "devDependencies": {
     "typescript": "^5.0.0"
