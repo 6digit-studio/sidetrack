@@ -1,7 +1,7 @@
 {
   "name": "@6digit/sidetrack",
-  "version": "0.1.0",
-  "description": "Development observability for AI-assisted coding - traceability and visibility into running code",
+  "version": "0.1.1",
+  "description": "Development observability for AI-assisted coding. Server, CLI, and client library. For client-only, see @6digit/sidetrack-client",
   "type": "module",
   "bin": {
     "sidetrack": "./cli/index.ts"
