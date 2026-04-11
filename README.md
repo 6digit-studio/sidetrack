@@ -1,115 +1,259 @@
-# 6digit-sidetrack
+# Sidetrack
 
-A development observability sink for AI-assisted development. Captures everything, queries smartly.
+Development observability for AI-assisted coding. Your AI assistant can finally see what's happening in your app.
 
 ## The Problem
 
-When debugging reactive systems with an AI assistant, the feedback loop is broken:
-- The human stares at browser DevTools
-- The AI is blind to runtime state
-- Debugging becomes a game of copy-paste telephone
+AI coding assistants are blind to runtime. They can read your code, but they can't see:
+- What's logging to the console
+- What network requests are failing
+- What errors are being thrown
+- What the user is clicking on
+
+Debugging becomes a game of copy-paste telephone between you and your AI.
 
 ## The Solution
 
-Sidetrack runs alongside your development session as a parallel track, capturing all events from browsers, servers, and tools. The AI can query it directly - no more copy-pasting from console.
+Sidetrack captures everything from your running app and makes it queryable. Your AI assistant can directly see what's happening - no more "can you paste the error message?"
+
+```bash
+# AI assistant runs this and instantly sees your app's state
+curl http://localhost:6274/recent?_type=console.error
+```
 
 ## Quick Start
 
+**1. Start the sidetrack server:**
+
 ```bash
-# Start the server
+git clone https://github.com/6digit-studio/sidetrack.git
+cd sidetrack
 bun run index.ts
-
-# In your browser app, add to <head>:
-<script src="http://localhost:6274/inject.js"></script>
-
-# Now query from anywhere:
-curl http://localhost:6274/recent
-curl "http://localhost:6274/search?q=error"
 ```
 
-## API
-
-### Ingest Events
+**2. Add to your app:**
 
 ```bash
-# Single event (any JSON)
-POST http://localhost:6274/events
-{"anything": "goes", "no": "schema"}
-
-# Batch events
-POST http://localhost:6274/events
-[{"event": 1}, {"event": 2}, {"event": 3}]
+# In your project
+bun link @6digit/sidetrack
 ```
 
-### Query Events
+```typescript
+import { init } from '@6digit/sidetrack'
+
+init()  // That's it. Everything is now captured.
+```
+
+**3. Query from anywhere:**
 
 ```bash
-# Recent events (default 100)
-GET http://localhost:6274/recent
-GET http://localhost:6274/recent?limit=50
-
-# Filter by any field
-GET http://localhost:6274/recent?type=console.error
-GET http://localhost:6274/recent?project=my-app
-
-# Search event data
-GET http://localhost:6274/search?q=searchterm
-GET http://localhost:6274/search?q=error&limit=20
-
-# Stats
-GET http://localhost:6274/stats
+curl http://localhost:6274/help           # See all available endpoints
+curl http://localhost:6274/recent         # Recent events
+curl http://localhost:6274/search?q=error # Search for errors
 ```
 
-### Browser Inject
+## What Gets Captured
 
-The server serves a browser client at `/inject.js` that:
-- Hooks `console.log`, `console.warn`, `console.error`, `console.debug`, `console.info`
-- Captures `window.error` and `unhandledrejection`
-- Batches events and flushes every second
-- Includes page URL and title with every event
-- Never blocks or interferes with normal operation
+Everything. By default. No configuration needed.
 
-## Design Principles
+| Category | What's Captured |
+|----------|-----------------|
+| **Console** | All console methods (log, warn, error, debug, info, trace, table, etc.) with stack traces |
+| **Errors** | Uncaught exceptions, unhandled promise rejections |
+| **Network** | Every fetch/XHR/http request and response - URL, headers, body, timing |
+| **Async** | Promise lifecycle, setTimeout/setInterval (Node/Bun) |
+| **DOM** | Clicks, form submissions, navigation, visibility changes (browser) |
 
-1. **Dumb ingest, smart query** - No schema, no validation, no filtering at capture time. Just swallow everything.
+## Multi-Runtime Support
 
-2. **Developer machine scale** - Not enterprise observability. Last 5 minutes, one machine, instant queries.
+Sidetrack auto-detects your environment and captures what's available:
 
-3. **Zero config** - One port (6274), one endpoint, works immediately.
+| Runtime | Console | Errors | Network | Async Hooks | DOM |
+|---------|:-------:|:------:|:-------:|:-----------:|:---:|
+| Browser | ✓ | ✓ | ✓ | - | ✓ |
+| Node.js | ✓ | ✓ | ✓ | ✓ | - |
+| Bun | ✓ | ✓ | ✓ | ✓ | - |
+| Deno | ✓ | ✓ | ✓ | - | - |
+| Workers | ✓ | ✓ | ✓ | - | - |
 
-4. **Multi-project** - One server handles all your projects. Events can have `project` or any field you want - query filters by it.
+## API Reference
 
-## Architecture
+The server is self-documenting:
 
+```bash
+curl http://localhost:6274/help
 ```
-Browser ──────┐
-              │
-Satellite ────┼──► POST /events ──► SQLite (in-memory) ──► GET /recent
-              │                                           GET /search
-Server logs ──┘
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /events` | Ingest events (any JSON) |
+| `GET /recent` | Query recent events |
+| `GET /search?q=term` | Full-text search |
+| `GET /stats` | Event count and time span |
+| `GET /help` | API documentation |
+
+### Filtering
+
+```bash
+# By event type
+curl "http://localhost:6274/recent?_type=console.error"
+curl "http://localhost:6274/recent?_type=fetch.request"
+
+# By runtime
+curl "http://localhost:6274/recent?_runtime=browser"
+curl "http://localhost:6274/recent?_runtime=bun"
+
+# By any field
+curl "http://localhost:6274/recent?status=500"
+
+# Combine filters
+curl "http://localhost:6274/recent?_type=fetch.response&status=404&limit=10"
 ```
 
-- **Storage**: In-memory SQLite, auto-prunes events older than 5 minutes
-- **Port**: 6274 (mnemonic: "6digit" → 6274)
-- **CORS**: Enabled for all origins
+## Configuration
+
+Sidetrack captures aggressively by default. You can dial it back if needed:
+
+```typescript
+init({
+  endpoint: 'http://localhost:6274/events',  // Where to send events
+  flushInterval: 500,                         // ms between flushes
+  
+  capture: {
+    console: true,   // Console methods
+    errors: true,    // Uncaught errors
+    network: true,   // fetch/XHR/http
+    async: true,     // Async hooks (Node/Bun)
+    dom: true,       // DOM events (browser)
+  },
+  
+  tags: {            // Added to every event
+    app: 'my-app',
+    env: 'development',
+  },
+})
+```
 
 ## For AI Assistants
 
-If you're an AI assistant working with a developer who has sidetrack running:
+If you're an AI assistant and the developer has sidetrack running:
 
 ```bash
-# See what just happened
+# Learn the API
+curl http://localhost:6274/help
+
+# See recent activity
 curl http://localhost:6274/recent?limit=20
 
-# Search for specific events
-curl "http://localhost:6274/search?q=error"
-curl "http://localhost:6274/search?q=notableActions"
+# Find errors
+curl "http://localhost:6274/recent?_type=console.error"
+curl "http://localhost:6274/recent?_type=error.uncaught"
+
+# See network failures
+curl "http://localhost:6274/recent?_type=fetch.error"
+curl "http://localhost:6274/search?q=500"
 
 # Check if it's running
 curl http://localhost:6274/stats
 ```
 
-You now have direct visibility into the browser console, reactive state updates, and any other events the developer's tools emit.
+You now have direct visibility into runtime state. No more asking the human to copy-paste from DevTools.
+
+## Design Philosophy
+
+**Capture aggressively, query smartly.** 
+
+The developer's machine is powerful enough to handle a firehose of events. We capture everything and let the query layer (and AI assistants) filter down to what matters. This is not a production logging system - it's a development tool that maximizes observability while minimizing setup.
+
+- **Zero config** - Works immediately with sensible defaults
+- **5-minute retention** - Recent events only, keeps it fast
+- **No schema** - Any JSON goes in, query by any field
+- **Development only** - Not for production, not for metrics, just for debugging
+
+## Architecture
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Browser   │     │   Node.js   │     │     Bun     │
+│             │     │             │     │             │
+│ @6digit/    │     │ @6digit/    │     │ @6digit/    │
+│ sidetrack   │     │ sidetrack   │     │ sidetrack   │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │
+       └───────────────────┼───────────────────┘
+                           │
+                           ▼
+                 POST http://localhost:6274/events
+                           │
+                           ▼
+               ┌───────────────────────┐
+               │   Sidetrack Server    │
+               │                       │
+               │  SQLite (in-memory)   │
+               │  5-minute retention   │
+               └───────────┬───────────┘
+                           │
+                           ▼
+               GET /recent, /search, /stats
+                           │
+                           ▼
+               ┌───────────────────────┐
+               │    AI Assistant or    │
+               │    Developer Query    │
+               └───────────────────────┘
+```
+
+## Installation
+
+### Server
+
+```bash
+# Clone and run
+git clone https://github.com/6digit-studio/sidetrack.git
+cd sidetrack
+bun run index.ts
+```
+
+Or with hot reload during development:
+```bash
+bun --hot index.ts
+```
+
+### Client Library
+
+```bash
+# npm
+npm install @6digit/sidetrack
+
+# bun
+bun add @6digit/sidetrack
+
+# Or link for development
+bun link @6digit/sidetrack
+```
+
+## Browser Script Tag (Alternative)
+
+If you can't use the npm package:
+
+```html
+<script src="http://localhost:6274/inject.js"></script>
+```
+
+This is a simpler inline script that captures console and errors only.
+
+## Contributing
+
+This project exists because AI coding assistants need better observability into running applications. If you have ideas for:
+
+- Additional capture sources (databases, state management, etc.)
+- Better query capabilities
+- Integrations with specific frameworks
+- Performance improvements
+
+Please open an issue or PR at [github.com/6digit-studio/sidetrack](https://github.com/6digit-studio/sidetrack).
 
 ## License
 

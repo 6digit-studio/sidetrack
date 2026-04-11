@@ -1,7 +1,7 @@
 {
-  "name": "sidetrack-client",
+  "name": "@6digit/sidetrack",
   "version": "0.1.0",
-  "description": "Development observability firehose - captures everything, queries smartly",
+  "description": "Development observability for AI-assisted coding - captures everything, queries smartly",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
