@@ -1,6 +1,6 @@
 {
   "name": "@6digit/sidetrack",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Development observability for AI-assisted coding. Server, CLI, and client library. For client-only, see @6digit/sidetrack-client",
   "type": "module",
   "bin": {
@@ -49,6 +49,9 @@
     "url": "https://github.com/6digit-studio/sidetrack/issues"
   },
   "homepage": "https://github.com/6digit-studio/sidetrack#readme",
+  "engines": {
+    "bun": ">=1.0.0"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5"

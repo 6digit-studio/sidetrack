@@ -208,11 +208,17 @@ The developer's machine is powerful enough to handle a firehose of events. We ca
 
 ## Installation
 
+### Requirements
+
+**The server and CLI require [Bun](https://bun.sh/).** The server uses `bun:sqlite` and `Bun.serve()` for performance. Node.js is not supported for the server.
+
+The client library (`@6digit/sidetrack-client`) works with any runtime (browser, Node.js, Bun, Deno).
+
 ### Global Install (Recommended)
 
 ```bash
-# Install globally
-npm install -g @6digit/sidetrack
+# Install globally with Bun
+bun add -g @6digit/sidetrack
 
 # Start the server
 sidetrack server
@@ -231,12 +237,11 @@ bun run start
 
 ### Client Library (for your app)
 
-```bash
-# npm
-npm install @6digit/sidetrack-client
+The client works with any package manager and runtime:
 
-# bun
-bun add @6digit/sidetrack-client
+```bash
+npm install @6digit/sidetrack-client
+# or: bun add @6digit/sidetrack-client
 ```
 
 Then in your app:
