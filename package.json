@@ -1,18 +1,56 @@
 {
-  "name": "6digit-sidetrack",
+  "name": "@6digit/sidetrack",
   "version": "0.1.0",
-  "description": "Development observability sink for AI-assisted development",
-  "module": "index.ts",
+  "description": "Development observability for AI-assisted coding - traceability and visibility into running code",
   "type": "module",
-  "private": true,
+  "bin": {
+    "sidetrack": "./cli/index.ts"
+  },
+  "main": "./client/dist/index.cjs",
+  "module": "./client/dist/index.mjs",
+  "types": "./client/dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./client/dist/index.mjs",
+      "require": "./client/dist/index.cjs",
+      "types": "./client/dist/index.d.ts"
+    },
+    "./browser": "./client/dist/sidetrack.js"
+  },
+  "files": [
+    "cli",
+    "client/dist",
+    "server",
+    "skills"
+  ],
   "scripts": {
-    "start": "bun run index.ts",
-    "dev": "bun --hot index.ts"
+    "start": "bun run server/index.ts",
+    "dev": "bun --hot server/index.ts",
+    "build": "cd client && bun run build.ts",
+    "prepublishOnly": "npm run build"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/6digit-studio/sidetrack.git"
+  },
+  "keywords": [
+    "observability",
+    "debugging",
+    "development",
+    "ai",
+    "claude",
+    "tracing",
+    "console",
+    "logging"
+  ],
+  "author": "6digit Studio",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/6digit-studio/sidetrack/issues"
+  },
+  "homepage": "https://github.com/6digit-studio/sidetrack#readme",
   "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
+    "@types/bun": "latest",
     "typescript": "^5"
   }
 }

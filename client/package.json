@@ -1,35 +1,10 @@
 {
-  "name": "@6digit/sidetrack",
-  "version": "0.1.0",
-  "description": "Development observability for AI-assisted coding - captures everything, queries smartly",
+  "name": "@6digit/sidetrack-client",
+  "private": true,
   "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs",
-      "types": "./dist/index.d.ts"
-    },
-    "./browser": "./dist/sidetrack.js"
-  },
   "scripts": {
-    "build": "bun run build.ts",
-    "dev": "bun run build.ts --watch"
+    "build": "bun run build.ts"
   },
-  "files": [
-    "dist"
-  ],
-  "keywords": [
-    "observability",
-    "debugging",
-    "development",
-    "console",
-    "logging",
-    "tracing"
-  ],
-  "license": "MIT",
   "devDependencies": {
     "typescript": "^5.0.0"
   }

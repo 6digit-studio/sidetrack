@@ -207,21 +207,28 @@ The developer's machine is powerful enough to handle a firehose of events. We ca
 
 ## Installation
 
-### Server
+### Global Install (Recommended)
 
 ```bash
-# Clone and run
+# Install globally
+npm install -g @6digit/sidetrack
+
+# Start the server
+sidetrack server
+
+# Install the Claude skill (enables /sidetrack in Claude Code)
+sidetrack install skill
+```
+
+### From Source
+
+```bash
 git clone https://github.com/6digit-studio/sidetrack.git
 cd sidetrack
-bun run index.ts
+bun run start
 ```
 
-Or with hot reload during development:
-```bash
-bun --hot index.ts
-```
-
-### Client Library
+### Client Library (for your app)
 
 ```bash
 # npm
@@ -229,10 +236,38 @@ npm install @6digit/sidetrack
 
 # bun
 bun add @6digit/sidetrack
-
-# Or link for development
-bun link @6digit/sidetrack
 ```
+
+Then in your app:
+```typescript
+import { init } from '@6digit/sidetrack'
+init()
+```
+
+## CLI Commands
+
+```bash
+sidetrack server              # Start the server
+sidetrack install skill       # Install Claude skill to ~/.claude/skills/
+
+sidetrack recent [limit]      # Show recent events
+sidetrack search <term>       # Search events
+sidetrack stats               # Show statistics
+
+sidetrack feedback            # List open feedback
+sidetrack resolve <id>        # Mark feedback resolved
+sidetrack wontfix <id>        # Mark feedback as wontfix
+
+sidetrack help                # Show all commands
+```
+
+## Claude Skill
+
+After running `sidetrack install skill`, any Claude Code session can query sidetrack directly. The skill teaches Claude:
+- How to check recent events
+- How to search for errors
+- How to read and manage feedback
+- When to proactively check sidetrack
 
 ## Browser Script Tag (Alternative)
 
