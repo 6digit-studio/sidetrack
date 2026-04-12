@@ -23,6 +23,7 @@ export const DEFAULT_FEEDBACK_CONFIG: FeedbackConfig = {
 };
 
 const STORAGE_KEY = 'sidetrack-feedback-position';
+const DRAFT_STORAGE_KEY = 'sidetrack-feedback-draft';
 
 // Store recent events for context
 let recentEvents: unknown[] = [];
@@ -63,6 +64,43 @@ function loadPosition(): { x: number; y: number } | null {
 function savePosition(x: number, y: number) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ x, y }));
+  } catch {
+    // Ignore localStorage errors
+  }
+}
+
+/**
+ * Load draft feedback text from localStorage
+ */
+function loadDraft(): string {
+  try {
+    return localStorage.getItem(DRAFT_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Save draft feedback text to localStorage
+ */
+function saveDraft(text: string) {
+  try {
+    if (text) {
+      localStorage.setItem(DRAFT_STORAGE_KEY, text);
+    } else {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore localStorage errors
+  }
+}
+
+/**
+ * Clear draft from localStorage
+ */
+function clearDraft() {
+  try {
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
   } catch {
     // Ignore localStorage errors
   }
@@ -377,7 +415,7 @@ function createWidget(config: FeedbackConfig, endpoint: string) {
     isOpen = true;
     updateModalPosition();
     modal.classList.add('visible');
-    textarea.value = '';
+    textarea.value = loadDraft();
     textarea.focus();
   }
   
@@ -428,6 +466,7 @@ function createWidget(config: FeedbackConfig, endpoint: string) {
         }),
       });
       
+      clearDraft();
       close();
       showToast();
     } catch (e) {
@@ -523,6 +562,11 @@ function createWidget(config: FeedbackConfig, endpoint: string) {
   closeBtn.addEventListener('click', close);
   cancelBtn.addEventListener('click', close);
   submitBtn.addEventListener('click', submit);
+  
+  // Save draft as user types
+  textarea.addEventListener('input', () => {
+    saveDraft(textarea.value);
+  });
   
   // Submit on Ctrl+Enter
   textarea.addEventListener('keydown', (e) => {

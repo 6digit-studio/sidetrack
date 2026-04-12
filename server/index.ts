@@ -14,6 +14,35 @@ const PORT = 6274;
 const MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
 const PRUNE_INTERVAL_MS = 30 * 1000; // prune every 30 seconds
 
+// SSE stream subscribers
+interface StreamSubscriber {
+  controller: ReadableStreamDefaultController;
+  pattern?: RegExp;
+  cwd?: string;
+}
+const streamSubscribers = new Set<StreamSubscriber>();
+
+// Broadcast event to all matching SSE subscribers
+function broadcastToSubscribers(event: Record<string, unknown>) {
+  const eventJson = JSON.stringify(event);
+  const eventCwd = event.cwd as string | undefined;
+  
+  for (const sub of streamSubscribers) {
+    // Filter by cwd if specified
+    if (sub.cwd && eventCwd !== sub.cwd) continue;
+    
+    // Filter by pattern if specified (match against full JSON)
+    if (sub.pattern && !sub.pattern.test(eventJson)) continue;
+    
+    try {
+      sub.controller.enqueue(`data: ${eventJson}\n\n`);
+    } catch {
+      // Connection closed, will be cleaned up
+      streamSubscribers.delete(sub);
+    }
+  }
+}
+
 // Initialize SQLite
 const db = new Database(":memory:"); // In-memory for now, fast and ephemeral
 db.run(`
@@ -55,7 +84,11 @@ function ingestEvents(events: unknown[]) {
   
   for (const event of events) {
     const data = typeof event === 'object' ? event : { value: event };
+    const dataWithMeta = { ...data, _received_at: now } as Record<string, unknown>;
     insert.run(now, JSON.stringify(data));
+    
+    // Broadcast to SSE subscribers
+    broadcastToSubscribers(dataWithMeta);
   }
   
   return events.length;
@@ -386,6 +419,51 @@ const server = Bun.serve({
       });
     }
     
+    // GET /stream - SSE event stream
+    if (req.method === "GET" && url.pathname === "/stream") {
+      const patternStr = url.searchParams.get("pattern");
+      const cwd = url.searchParams.get("cwd") || undefined;
+      
+      let pattern: RegExp | undefined;
+      if (patternStr) {
+        try {
+          pattern = new RegExp(patternStr, 'i');
+        } catch {
+          return new Response(JSON.stringify({ ok: false, error: 'Invalid regex pattern' }), {
+            status: 400,
+            headers
+          });
+        }
+      }
+      
+      const stream = new ReadableStream({
+        start(controller) {
+          const subscriber: StreamSubscriber = { controller, pattern, cwd };
+          streamSubscribers.add(subscriber);
+          
+          // Send initial connection message
+          controller.enqueue(`data: ${JSON.stringify({ type: "connected", pattern: patternStr, cwd })}\n\n`);
+          
+          // Cleanup on close
+          req.signal.addEventListener('abort', () => {
+            streamSubscribers.delete(subscriber);
+          });
+        },
+        cancel() {
+          // Stream cancelled
+        }
+      });
+      
+      return new Response(stream, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive"
+        }
+      });
+    }
+
     // GET /help - API documentation
     if (url.pathname === "/help") {
       const helpText = `Sidetrack - Development Observability Sink
@@ -415,6 +493,15 @@ GET /search?q=term
 GET /stats
   Event count and time span
   Returns: { count, oldest_at, newest_at, span_ms }
+
+GET /stream
+  Server-Sent Events stream of new events
+  Params:
+    ?pattern=regex    Filter events by regex (matched against JSON)
+    ?cwd=/path        Filter events by cwd field
+  
+  Events are sent as: data: {json}\n\n
+  First event is: { "type": "connected", "pattern": "...", "cwd": "..." }
 
 GET /inject.js
   Legacy browser inject script (use sidetrack-client instead)

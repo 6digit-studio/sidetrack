@@ -230,6 +230,93 @@ async function showStats() {
   }
 }
 
+async function tailStream(pattern?: string, cwd?: string) {
+  let url = `${SIDETRACK_URL}/stream`;
+  const params = new URLSearchParams();
+  if (pattern) params.set('pattern', pattern);
+  if (cwd) params.set('cwd', cwd);
+  if (params.toString()) url += `?${params}`;
+  
+  console.log(`Connecting to ${url}...`);
+  console.log('Press Ctrl+C to stop.\n');
+  
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Server returned ${res.status}`);
+    }
+    
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+    
+    const decoder = new TextDecoder();
+    let buffer = '';
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      
+      // Process complete SSE messages
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // Keep incomplete line in buffer
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.slice(6);
+          try {
+            const event = JSON.parse(jsonStr);
+            
+            // Skip the connection message
+            if (event.type === 'connected') {
+              console.log(`Connected. Watching for events${pattern ? ` matching /${pattern}/i` : ''}${cwd ? ` in ${cwd}` : ''}...\n`);
+              continue;
+            }
+            
+            // Format and print the event
+            const time = new Date(event._received_at || Date.now()).toLocaleTimeString();
+            const type = event._type || event.type || event.brain || 'event';
+            const cwdStr = event.cwd ? ` [${event.cwd.split('/').slice(-2).join('/')}]` : '';
+            
+            // Build a summary from common fields
+            let summary = '';
+            if (event.text) {
+              summary = event.text.slice(0, 150);
+            } else if (event.msg) {
+              summary = event.msg.slice(0, 150);
+            } else if (event.message) {
+              summary = event.message.slice(0, 150);
+            } else if (event.args) {
+              summary = event.args.map((a: unknown) => 
+                typeof a === 'string' ? a : JSON.stringify(a)
+              ).join(' ').slice(0, 150);
+            } else {
+              // Fallback: show condensed JSON
+              const { _received_at, _id, ...rest } = event;
+              summary = JSON.stringify(rest).slice(0, 150);
+            }
+            
+            console.log(`[${time}]${cwdStr} ${type}: ${summary}`);
+          } catch {
+            // Not valid JSON, skip
+          }
+        }
+      }
+    }
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      console.log('\nStream closed.');
+      return;
+    }
+    console.error('Failed to connect to stream. Is the server running?');
+    console.error(`  ${err}`);
+    process.exit(1);
+  }
+}
+
 function showHelp() {
   console.log(`
 Sidetrack - Development observability for AI-assisted coding
@@ -241,6 +328,7 @@ COMMANDS:
   server              Start the sidetrack server
   install skill       Install Claude skill to ~/.claude/skills/
   
+  tail [pattern]      Stream events in real-time (SSE)
   recent [limit]      Show recent events (default: 20)
   search <term>       Search events
   stats               Show event statistics
@@ -257,6 +345,9 @@ ENVIRONMENT:
 EXAMPLES:
   sidetrack server
   sidetrack install skill
+  sidetrack tail                    # stream all events
+  sidetrack tail "error|BLOCKED"    # stream events matching pattern
+  sidetrack tail --cwd=/path/to/dir # stream events from specific directory
   sidetrack recent 50
   sidetrack search "error"
   sidetrack feedback
@@ -281,6 +372,26 @@ switch (command) {
       process.exit(1);
     }
     break;
+    
+  case 'tail': {
+    // Parse tail arguments: sidetrack tail [pattern] [--cwd=path]
+    let pattern: string | undefined;
+    let cwd: string | undefined;
+    
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i];
+      if (arg.startsWith('--cwd=')) {
+        cwd = arg.slice(6);
+      } else if (arg.startsWith('--pattern=')) {
+        pattern = arg.slice(10);
+      } else if (!arg.startsWith('--')) {
+        pattern = arg;
+      }
+    }
+    
+    tailStream(pattern, cwd);
+    break;
+  }
     
   case 'recent':
     queryRecent(parseInt(args[1]) || 20, args[2]);
