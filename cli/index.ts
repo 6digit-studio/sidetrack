@@ -230,6 +230,80 @@ async function showStats() {
   }
 }
 
+async function awaitEvent(pattern: string, cwd?: string, timeoutMs?: number): Promise<void> {
+  let url = `${SIDETRACK_URL}/stream`;
+  const params = new URLSearchParams();
+  params.set('pattern', pattern);
+  if (cwd) params.set('cwd', cwd);
+  url += `?${params}`;
+  
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  
+  if (timeoutMs) {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      console.error(`Timeout: no event matching /${pattern}/i after ${timeoutMs / 1000}s`);
+      process.exit(1);
+    }, timeoutMs);
+  }
+  
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`Server returned ${res.status}`);
+    }
+    
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+    
+    const decoder = new TextDecoder();
+    let buffer = '';
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      
+      // Process complete SSE messages
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.slice(6);
+          try {
+            const event = JSON.parse(jsonStr);
+            
+            // Skip the connection message
+            if (event.type === 'connected') {
+              continue;
+            }
+            
+            // Found a matching event! Print and exit successfully.
+            if (timeoutId) clearTimeout(timeoutId);
+            console.log(JSON.stringify(event));
+            process.exit(0);
+          } catch {
+            // Not valid JSON, skip
+          }
+        }
+      }
+    }
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      // Timeout already handled
+      return;
+    }
+    console.error('Failed to connect to stream. Is the server running?');
+    console.error(`  ${err}`);
+    process.exit(1);
+  }
+}
+
 async function tailStream(pattern?: string, cwd?: string) {
   let url = `${SIDETRACK_URL}/stream`;
   const params = new URLSearchParams();
@@ -329,6 +403,7 @@ COMMANDS:
   install skill       Install Claude skill to ~/.claude/skills/
   
   tail [pattern]      Stream events in real-time (SSE)
+  await <pattern>     Block until an event matches pattern
   recent [limit]      Show recent events (default: 20)
   search <term>       Search events
   stats               Show event statistics
@@ -348,6 +423,8 @@ EXAMPLES:
   sidetrack tail                    # stream all events
   sidetrack tail "error|BLOCKED"    # stream events matching pattern
   sidetrack tail --cwd=/path/to/dir # stream events from specific directory
+  sidetrack await "DONE"            # block until DONE appears
+  sidetrack await "HANDOFF" --timeout=30  # timeout after 30 seconds
   sidetrack recent 50
   sidetrack search "error"
   sidetrack feedback
@@ -390,6 +467,32 @@ switch (command) {
     }
     
     tailStream(pattern, cwd);
+    break;
+  }
+  
+  case 'await': {
+    // Parse await arguments: sidetrack await <pattern> [--cwd=path] [--timeout=seconds]
+    let pattern: string | undefined;
+    let cwd: string | undefined;
+    let timeoutMs: number | undefined;
+    
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i];
+      if (arg.startsWith('--cwd=')) {
+        cwd = arg.slice(6);
+      } else if (arg.startsWith('--timeout=')) {
+        timeoutMs = parseInt(arg.slice(10)) * 1000; // Convert seconds to ms
+      } else if (!arg.startsWith('--')) {
+        pattern = arg;
+      }
+    }
+    
+    if (!pattern) {
+      console.error('Usage: sidetrack await <pattern> [--timeout=seconds] [--cwd=path]');
+      process.exit(1);
+    }
+    
+    awaitEvent(pattern, cwd, timeoutMs);
     break;
   }
     

@@ -75,18 +75,18 @@ Add real-time streaming to Sidetrack so consumers can tail events.
 - [x] `GET /stream?cwd=X` - filter stream by working directory
 - [x] Update `sidetrack tail` CLI command to use SSE
 
-### Phase 2: Satellite Fan-Out
+### Phase 2: Satellite Fan-Out ✅
 Location: `6digit-satellite`
 
 Satellite becomes the fan-out point, writing ACP events to both Convex and Sidetrack.
 
-- [ ] Add `backplane` config to satellite.json
-- [ ] In `ACPSession.pushEvent()`:
-  - [ ] Write to Convex `acp/events` table (persistent, required)
-  - [ ] POST to Sidetrack (ephemeral, optional, fire-and-forget)
-- [ ] Include: brain, cwd, session, event type, payload
-- [ ] Sidetrack failures should not affect Convex writes
-- [ ] Config flag to disable Sidetrack integration if not running
+- [x] Buffered, fire-and-forget queue (`sidetrack-queue.ts`)
+- [x] In `ACPSession.pushEvent()`:
+  - [x] Write to Convex `acp/events` table (persistent, required)
+  - [x] POST to Sidetrack (ephemeral, optional, fire-and-forget)
+- [x] Include: sessionId, satelliteId, event type, payload
+- [x] Sidetrack failures silently drop (doesn't affect Convex writes)
+- [x] Works automatically when Sidetrack is running on localhost:6274
 
 ### Phase 3: Satellite Subscriptions & Wake-up
 Location: `6digit-satellite`
@@ -113,16 +113,16 @@ Human-facing stream view on the CORDIAL surface. **Reads from Convex only** - no
 - [ ] Visual distinction: agent messages vs human messages
 - [ ] Works even if Sidetrack is not running
 
-### Phase 5: `sidetrack await` CLI
+### Phase 5: `sidetrack await` CLI ✅
 Location: `6digit-sidetrack`
 
 Block until a pattern appears. Useful for scripts, CI, automation.
 
-- [ ] `sidetrack await <pattern>` - blocks until match
-- [ ] `--timeout=N` - fail after N seconds
-- [ ] `--cwd=X` - scope to working directory
-- [ ] Exit 0 on match, exit 1 on timeout
-- [ ] Print matching event(s) to stdout
+- [x] `sidetrack await <pattern>` - blocks until match
+- [x] `--timeout=N` - fail after N seconds
+- [x] `--cwd=X` - scope to working directory
+- [x] Exit 0 on match, exit 1 on timeout
+- [x] Print matching event to stdout (as JSON)
 
 ## Vocabulary Conventions (Example)
 
