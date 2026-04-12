@@ -196,6 +196,7 @@ function deleteFeedback(id: number) {
 // HTTP Server
 const server = Bun.serve({
   port: PORT,
+  idleTimeout: 255, // max value — SSE streams need long-lived connections
   async fetch(req) {
     const url = new URL(req.url);
     
@@ -440,12 +441,22 @@ const server = Bun.serve({
         start(controller) {
           const subscriber: StreamSubscriber = { controller, pattern, cwd };
           streamSubscribers.add(subscriber);
-          
+
           // Send initial connection message
           controller.enqueue(`data: ${JSON.stringify({ type: "connected", pattern: patternStr, cwd })}\n\n`);
-          
+
+          // Keepalive ping every 15s so the connection never looks idle to Bun
+          const keepalive = setInterval(() => {
+            try {
+              controller.enqueue(`: keepalive\n\n`);
+            } catch {
+              clearInterval(keepalive);
+            }
+          }, 15_000);
+
           // Cleanup on close
           req.signal.addEventListener('abort', () => {
+            clearInterval(keepalive);
             streamSubscribers.delete(subscriber);
           });
         },
