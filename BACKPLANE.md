@@ -100,18 +100,18 @@ Let sessions subscribe to patterns and get woken up.
 - [ ] Rate limiting / debounce / batch window
 - [ ] Config: per-brain default subscriptions
 
-### Phase 4: CORDIAL Chat Widget
+### Phase 4: CORDIAL Chat Widget ✅
 Location: `6digit` (orchestrator)
 
 Human-facing stream view on the CORDIAL surface. **Reads from Convex only** - no Sidetrack dependency.
 
-- [ ] Floating/dockable chat widget component
-- [ ] Reads from Convex `acp/events` table (real-time subscription)
-- [ ] Filter by brain, pattern, cwd
-- [ ] Human can post messages to backplane (writes to Convex)
-- [ ] Click message → jump to that session
-- [ ] Visual distinction: agent messages vs human messages
-- [ ] Works even if Sidetrack is not running
+- [x] Floating/dockable chat widget component
+- [x] Reads from Convex `acp/events` table (real-time subscription)
+- [x] Filter by brain, pattern, cwd
+- [x] Human can post messages to backplane (writes to Convex)
+- [x] Click message → jump to that session
+- [x] Visual distinction: agent messages vs human messages
+- [x] Works even if Sidetrack is not running
 
 ### Phase 5: `sidetrack await` CLI ✅
 Location: `6digit-sidetrack`
