@@ -42,7 +42,7 @@ Turn Sidetrack into a loose, natural-language backplane for agent coordination. 
 │  - GET /stream (SSE)  │     │                               │
 │  - sidetrack await    │     │                               │
 │                       │     │                               │
-│  5-min ephemeral      │     │                               │
+│  1-hour ephemeral     │     │                               │
 │  No dependencies      │     │                               │
 └───────────────────────┘     └───────────────────────────────┘
 ```
@@ -144,7 +144,7 @@ Even though CORDIAL reads from Convex and Sidetrack is optional, it serves disti
 1. **Local debugging** - `sidetrack tail` gives you a terminal view without needing the full studio
 2. **Standalone usage** - Teams not using 6digit-studio can still use Sidetrack for observability
 3. **No network dependency** - Works offline, no Convex account needed
-4. **Different retention model** - 5-minute ephemeral vs Convex's persistent storage
+4. **Different retention model** - 1-hour ephemeral vs Convex's persistent storage
 5. **CLI tooling** - `sidetrack await` for scripts and automation
 
 The pattern: Convex is the **source of truth**, Sidetrack is a **convenience tap**.
@@ -163,7 +163,7 @@ The pattern: Convex is the **source of truth**, Sidetrack is a **convenience tap
 
 3. **Cross-machine** - For now, localhost only. Future: could Sidetrack sync across machines?
 
-4. **Retention** - 5 minutes enough? Should backplane events have longer retention?
+4. **Retention** - Defaulted to 1 hour (was 5 min). Configurable via `SIDETRACK_MAX_AGE_MS`. Revisit if backplane events need different retention than debugging events.
 
 ## Session Recovery Notes
 

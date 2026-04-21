@@ -4,7 +4,7 @@ Development observability sink for AI-assisted development.
 
 ## What This Is
 
-A local HTTP server that captures structured events from browsers, satellites, and any other source. Stores the last 5 minutes in-memory. Queryable via HTTP.
+A local HTTP server that captures structured events from browsers, satellites, and any other source. Stores the last hour in-memory (tunable via `SIDETRACK_MAX_AGE_MS`). Queryable via HTTP.
 
 The core insight: **Dumb ingest, smart query.** No schema, no filtering at capture time. Just swallow everything, query it later.
 
@@ -22,7 +22,7 @@ bun --hot index.ts
 
 - **Port**: 6274
 - **Storage**: In-memory SQLite via `bun:sqlite`
-- **Retention**: 5 minutes, auto-pruned every 30 seconds
+- **Retention**: 1 hour by default (override with `SIDETRACK_MAX_AGE_MS` env var, in ms), auto-pruned every 30 seconds
 
 ## Endpoints
 
