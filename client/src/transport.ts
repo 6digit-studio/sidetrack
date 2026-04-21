@@ -11,14 +11,67 @@ interface FullEvent extends EventInput {
   _runtime: string;
   _seq: number;
   _tags?: Record<string, string>;
+  // Server runtimes
+  cwd?: string;
+  // Browser runtimes
+  url?: string;
+  origin?: string;
+  hostname?: string;
+}
+
+// Get static context fields (captured once at init)
+function getStaticContextFields(runtime: string): Partial<FullEvent> {
+  // Server runtimes: include cwd (doesn't change)
+  if (runtime === 'node' || runtime === 'bun') {
+    return { cwd: process.cwd() };
+  }
+  
+  if (runtime === 'deno') {
+    return { cwd: (globalThis as any).Deno.cwd() };
+  }
+  
+  // Browser: origin and hostname are stable
+  if (runtime === 'browser' && typeof window !== 'undefined') {
+    return {
+      origin: window.location.origin,
+      hostname: window.location.hostname,
+    };
+  }
+  
+  // Worker: limited access, try to get origin from self.location
+  if (runtime === 'worker' && typeof self !== 'undefined' && 'location' in self) {
+    const loc = (self as any).location;
+    return {
+      origin: loc.origin,
+      hostname: loc.hostname,
+    };
+  }
+  
+  return {};
+}
+
+// Get dynamic context fields (captured per event)
+function getDynamicContextFields(runtime: string): Partial<FullEvent> {
+  // Browser: URL changes as user navigates
+  if (runtime === 'browser' && typeof window !== 'undefined') {
+    return { url: window.location.href };
+  }
+  
+  return {};
 }
 
 export function createTransport(config: Config): Transport {
   const runtime = detectRuntime();
+  const staticContext = getStaticContextFields(runtime);
   let buffer: FullEvent[] = [];
   let seq = 0;
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let destroyed = false;
+
+  // Heartbeat state: liveness signals for "is the subject alive?"
+  let lastFlushAt = 0; // ms timestamp of last successful flush; 0 means never
+  let eventsSinceLastHeartbeat = 0;
 
   // Start the flush interval
   function scheduleFlush() {
@@ -50,6 +103,8 @@ export function createTransport(config: Config): Transport {
         if (buffer.length > config.maxBufferSize) {
           buffer = buffer.slice(-config.maxBufferSize);
         }
+      } else {
+        lastFlushAt = Date.now();
       }
     } catch {
       // Network error - put events back
@@ -62,6 +117,53 @@ export function createTransport(config: Config): Transport {
     // Schedule next flush if there are still events
     if (buffer.length > 0 && !destroyed) {
       scheduleFlush();
+    }
+  }
+
+  // Internal send — used by both the public method and the heartbeat
+  function sendEvent(event: EventInput) {
+    if (destroyed) return;
+
+    const fullEvent: FullEvent = {
+      ...event,
+      ...staticContext,
+      ...getDynamicContextFields(runtime),
+      _ts: Date.now(),
+      _runtime: runtime,
+      _seq: seq++,
+      ...(Object.keys(config.tags).length > 0 ? { _tags: config.tags } : {}),
+    };
+
+    // Count real events (exclude our own heartbeats)
+    if (event._type !== 'sidetrack.heartbeat') {
+      eventsSinceLastHeartbeat++;
+    }
+
+    buffer.push(fullEvent);
+
+    // Flush immediately if buffer is getting full
+    if (buffer.length >= config.maxBufferSize * 0.9) {
+      flush();
+    } else {
+      scheduleFlush();
+    }
+  }
+
+  // Start heartbeat interval if enabled
+  if (config.heartbeatInterval > 0) {
+    heartbeatTimer = setInterval(() => {
+      if (destroyed) return;
+      const snapshot = {
+        queueDepth: buffer.length,
+        lastFlushAt,
+        eventsSinceLastHeartbeat,
+      };
+      eventsSinceLastHeartbeat = 0;
+      sendEvent({ _type: 'sidetrack.heartbeat', ...snapshot });
+    }, config.heartbeatInterval);
+    // Don't keep Node/Bun event loop alive for heartbeats alone
+    if ((runtime === 'node' || runtime === 'bun') && typeof heartbeatTimer === 'object' && heartbeatTimer && 'unref' in heartbeatTimer) {
+      (heartbeatTimer as unknown as { unref: () => void }).unref();
     }
   }
 
@@ -110,24 +212,7 @@ export function createTransport(config: Config): Transport {
 
   return {
     send(event: EventInput) {
-      if (destroyed) return;
-
-      const fullEvent: FullEvent = {
-        ...event,
-        _ts: Date.now(),
-        _runtime: runtime,
-        _seq: seq++,
-        ...(Object.keys(config.tags).length > 0 ? { _tags: config.tags } : {}),
-      };
-
-      buffer.push(fullEvent);
-
-      // Flush immediately if buffer is getting full
-      if (buffer.length >= config.maxBufferSize * 0.9) {
-        flush();
-      } else {
-        scheduleFlush();
-      }
+      sendEvent(event);
     },
 
     async flush() {
@@ -139,6 +224,10 @@ export function createTransport(config: Config): Transport {
       if (flushTimer) {
         clearTimeout(flushTimer);
         flushTimer = null;
+      }
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
       }
       // Final flush attempt
       flush();

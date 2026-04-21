@@ -23,18 +23,22 @@ curl http://localhost:6274/recent?_type=console.error
 
 ## Quick Start
 
-**1. Start the sidetrack server:**
+**1. Install sidetrack globally:**
 
 ```bash
-git clone https://github.com/6digit-studio/sidetrack.git
-cd sidetrack
-bun run index.ts
+bun add -g @6digit/sidetrack
 ```
 
-**2. Add to your app:**
+**2. Initialize your project:**
 
 ```bash
-# In your project
+cd your-project
+sidetrack init    # Creates .sidetrack/config.json
+```
+
+**3. Add to your app:**
+
+```bash
 npm install @6digit/sidetrack-client
 # or: bun add @6digit/sidetrack-client
 ```
@@ -42,16 +46,42 @@ npm install @6digit/sidetrack-client
 ```typescript
 import { init } from '@6digit/sidetrack-client'
 
-init()  // That's it. Everything is now captured.
+init()  // Discovers config, auto-starts server, captures everything
 ```
 
-**3. Query from anywhere:**
+**4. Query from anywhere in the project:**
 
 ```bash
-curl http://localhost:6274/help           # See all available endpoints
-curl http://localhost:6274/recent         # Recent events
-curl http://localhost:6274/search?q=error # Search for errors
+sidetrack recent                  # Recent events
+sidetrack search "error"          # Search for errors
+sidetrack stats                   # Check if it's running
 ```
+
+The CLI automatically finds your `.sidetrack/config.json` and talks to the right server.
+
+## Project Configuration
+
+Each project can have its own sidetrack server, keeping events isolated:
+
+```bash
+cd ~/src/my-app
+sidetrack init              # Uses default port 6274
+```
+
+**For related projects** (frontend + API + worker) that should share a server:
+
+```bash
+cd ~/src/my-app-api
+sidetrack init --port=6280
+
+cd ~/src/my-app-frontend  
+sidetrack init --port=6280  # Same port = shared server
+
+cd ~/src/my-app-worker
+sidetrack init --port=6280
+```
+
+All three projects now share the same observability backplane. Query from any of them and see the full picture.
 
 ## What Gets Captured
 
@@ -112,6 +142,30 @@ curl "http://localhost:6274/recent?status=500"
 # Combine filters
 curl "http://localhost:6274/recent?_type=fetch.response&status=404&limit=10"
 ```
+
+## Checkpoints
+
+Emit custom timing checkpoints for performance analysis and correlation:
+
+```typescript
+import { init } from '@6digit/sidetrack-client'
+
+const sidetrack = init()
+const sessionId = crypto.randomUUID()
+
+sidetrack.checkpoint(sessionId, 'app_start')
+sidetrack.checkpoint(sessionId, 'queries_subscribed', { count: 14 })
+// ... time passes ...
+sidetrack.checkpoint(sessionId, 'all_queries_ready')
+sidetrack.checkpoint(sessionId, 'render_complete')
+```
+
+Query checkpoints by correlation ID:
+```bash
+curl "http://localhost:6274/recent?_type=checkpoint&id=abc-123"
+```
+
+The timestamps let you compute duration between any two checkpoints. Use the correlation ID to track a request, session, or app instance across its lifecycle.
 
 ## Configuration
 
@@ -253,19 +307,27 @@ init()
 ## CLI Commands
 
 ```bash
-sidetrack server              # Start the server
+# Project setup
+sidetrack init [--port=N]     # Initialize project config
+sidetrack server              # Start the server manually
 sidetrack install skill       # Install Claude skill to ~/.claude/skills/
 
+# Querying
 sidetrack recent [limit]      # Show recent events
 sidetrack search <term>       # Search events
 sidetrack stats               # Show statistics
+sidetrack tail [pattern]      # Stream events in real-time
+sidetrack await <pattern>     # Block until pattern matches
 
+# Feedback
 sidetrack feedback            # List open feedback
 sidetrack resolve <id>        # Mark feedback resolved
 sidetrack wontfix <id>        # Mark feedback as wontfix
 
-sidetrack help                # Show all commands
+sidetrack help                # Show active config and all commands
 ```
+
+The CLI automatically discovers `.sidetrack/config.json` by walking up from your current directory.
 
 ## Claude Skill
 

@@ -24,6 +24,8 @@ export interface Config {
   endpoint: string;
   flushInterval: number;
   maxBufferSize: number;
+  /** Emit a sidetrack.heartbeat event every N ms. 0 disables. Default 10000. */
+  heartbeatInterval: number;
   capture: {
     console: boolean;
     errors: boolean;
@@ -51,6 +53,7 @@ export const DEFAULT_CONFIG: Config = {
   endpoint: 'http://localhost:6274/events',
   flushInterval: 500,
   maxBufferSize: 10000,
+  heartbeatInterval: 10000,
   capture: {
     console: true,
     errors: true,
@@ -160,6 +163,22 @@ export interface DomFocusEvent extends BaseEvent {
   _type: 'dom.focus' | 'dom.blur';
 }
 
+// Checkpoint events - for timing and correlation
+export interface CheckpointEvent extends BaseEvent {
+  _type: 'checkpoint';
+  id: string;           // correlation ID
+  name: string;         // checkpoint name
+  [key: string]: unknown;  // payload fields
+}
+
+// Heartbeat events - liveness signal from the client
+export interface HeartbeatEvent extends BaseEvent {
+  _type: 'sidetrack.heartbeat';
+  queueDepth: number;              // events currently buffered, awaiting flush
+  lastFlushAt: number;             // ms timestamp of last successful flush (0 if never)
+  eventsSinceLastHeartbeat: number; // non-heartbeat events captured since last tick
+}
+
 export type SidetrackEvent =
   | ConsoleEvent
   | ErrorEvent
@@ -171,7 +190,9 @@ export type SidetrackEvent =
   | DomSubmitEvent
   | DomNavigateEvent
   | DomVisibilityEvent
-  | DomFocusEvent;
+  | DomFocusEvent
+  | CheckpointEvent
+  | HeartbeatEvent;
 
 // Event input (what capture modules send - doesn't need envelope fields)
 export interface EventInput {
@@ -189,4 +210,23 @@ export interface Transport {
 // Capture module interface
 export interface CaptureModule {
   destroy(): void;
+}
+
+// Command types for remote execution
+export interface CommandHandler {
+  description?: string;
+  handler: (...args: unknown[]) => unknown | Promise<unknown>;
+}
+
+export interface PendingCommand {
+  id: string;
+  created_at: number;
+  name: string;
+  args: unknown[];
+}
+
+export interface CommandResult {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
 }

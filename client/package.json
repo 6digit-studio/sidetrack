@@ -1,6 +1,6 @@
 {
   "name": "@6digit/sidetrack-client",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Development observability client - captures console, network, errors, and more. For server/CLI, see @6digit/sidetrack",
   "type": "module",
   "main": "./dist/index.cjs",

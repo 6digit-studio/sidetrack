@@ -9,8 +9,47 @@
  */
 
 import { Database } from "bun:sqlite";
+import { existsSync, readFileSync } from "fs";
+import { join, dirname } from "path";
 
-const PORT = 6274;
+const DEFAULT_PORT = 6274;
+
+// Walk up directory tree to find .sidetrack/config.json
+function findConfig(): { port: number } | null {
+  let dir = process.cwd();
+  while (dir !== '/') {
+    const configPath = join(dir, '.sidetrack', 'config.json');
+    if (existsSync(configPath)) {
+      try {
+        const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+        return config;
+      } catch {
+        // Invalid config, keep looking
+      }
+    }
+    dir = dirname(dir);
+  }
+  return null;
+}
+
+// Determine port: env var > config file > default
+function getPort(): number {
+  // Environment variable takes precedence
+  if (process.env.PORT) {
+    const envPort = parseInt(process.env.PORT);
+    if (!isNaN(envPort)) return envPort;
+  }
+
+  // Try to find config
+  const config = findConfig();
+  if (config?.port) {
+    return config.port;
+  }
+
+  return DEFAULT_PORT;
+}
+
+const PORT = getPort();
 const MAX_AGE_MS = process.env.SIDETRACK_MAX_AGE_MS
   ? Number(process.env.SIDETRACK_MAX_AGE_MS)
   : 60 * 60 * 1000; // 1 hour default
@@ -71,6 +110,22 @@ db.run(`
 db.run(`CREATE INDEX idx_feedback_created ON feedback(created_at)`);
 db.run(`CREATE INDEX idx_feedback_status ON feedback(status)`);
 
+// Commands table - for remote command execution
+db.run(`
+  CREATE TABLE commands (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    args TEXT,
+    status TEXT DEFAULT 'pending',
+    result TEXT,
+    error TEXT,
+    completed_at INTEGER
+  )
+`);
+db.run(`CREATE INDEX idx_commands_status ON commands(status)`);
+db.run(`CREATE INDEX idx_commands_created ON commands(created_at)`);
+
 // Prune old events periodically
 setInterval(() => {
   const cutoff = Date.now() - MAX_AGE_MS;
@@ -97,26 +152,47 @@ function ingestEvents(events: unknown[]) {
   return events.length;
 }
 
-// Query recent events
+// Query recent events.
+// Supports compound AND filters with three operators selected by a suffix on the key:
+//   ?key=value    exact match (default)
+//   ?key!=value   negation (field does not equal value, or field is absent)
+//   ?key~=value   substring match (field contains value)
+// Example: /recent?_type!=sidetrack.heartbeat&url~=/api/
 function getRecent(limit = 100, filters: Record<string, string> = {}) {
   const rows = db.query(`
-    SELECT id, received_at, data FROM events 
-    ORDER BY received_at DESC, id DESC 
+    SELECT id, received_at, data FROM events
+    ORDER BY received_at DESC, id DESC
     LIMIT ?
   `).all(limit) as Array<{ id: number; received_at: number; data: string }>;
-  
+
   let results = rows.map(row => ({
     _id: row.id,
     _received_at: row.received_at,
     ...JSON.parse(row.data)
-  }));
-  
-  // Apply filters (simple key matching)
-  for (const [key, value] of Object.entries(filters)) {
-    if (key === 'limit') continue;
-    results = results.filter(e => String(e[key]) === value);
+  })) as Array<Record<string, unknown>>;
+
+  for (const [rawKey, value] of Object.entries(filters)) {
+    if (rawKey === 'limit') continue;
+
+    let op: 'eq' | 'ne' | 'contains' = 'eq';
+    let key = rawKey;
+    if (rawKey.endsWith('!')) {
+      op = 'ne';
+      key = rawKey.slice(0, -1);
+    } else if (rawKey.endsWith('~')) {
+      op = 'contains';
+      key = rawKey.slice(0, -1);
+    }
+
+    results = results.filter(e => {
+      const raw = e[key];
+      const fieldValue = raw === undefined || raw === null ? null : String(raw);
+      if (op === 'eq') return fieldValue === value;
+      if (op === 'ne') return fieldValue !== value;
+      return fieldValue !== null && fieldValue.includes(value);
+    });
   }
-  
+
   return results.reverse(); // Chronological order
 }
 
@@ -195,6 +271,95 @@ function deleteFeedback(id: number) {
   const result = db.run(`DELETE FROM feedback WHERE id = ?`, [id]);
   return result.changes > 0;
 }
+
+// Generate a unique command ID
+function generateCommandId(): string {
+  return `cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Submit a command for execution
+function submitCommand(name: string, args: unknown[] = []): string {
+  const id = generateCommandId();
+  const now = Date.now();
+  db.run(
+    `INSERT INTO commands (id, created_at, name, args, status) VALUES (?, ?, ?, ?, 'pending')`,
+    [id, now, name, JSON.stringify(args)]
+  );
+  return id;
+}
+
+// Get pending commands (for clients to poll)
+function getPendingCommands() {
+  const rows = db.query(`
+    SELECT id, created_at, name, args FROM commands 
+    WHERE status = 'pending'
+    ORDER BY created_at ASC
+  `).all() as Array<{ id: string; created_at: number; name: string; args: string }>;
+  
+  return rows.map(row => ({
+    id: row.id,
+    created_at: row.created_at,
+    name: row.name,
+    args: JSON.parse(row.args || '[]')
+  }));
+}
+
+// Get a specific command by ID
+function getCommand(id: string) {
+  const row = db.query(`SELECT * FROM commands WHERE id = ?`).get(id) as {
+    id: string;
+    created_at: number;
+    name: string;
+    args: string;
+    status: string;
+    result: string | null;
+    error: string | null;
+    completed_at: number | null;
+  } | null;
+  
+  if (!row) return null;
+  
+  return {
+    id: row.id,
+    created_at: row.created_at,
+    name: row.name,
+    args: JSON.parse(row.args || '[]'),
+    status: row.status,
+    result: row.result ? JSON.parse(row.result) : null,
+    error: row.error,
+    completed_at: row.completed_at
+  };
+}
+
+// Mark a command as completed with result
+function completeCommand(id: string, result: unknown) {
+  const now = Date.now();
+  const resultJson = JSON.stringify(result);
+  const dbResult = db.run(
+    `UPDATE commands SET status = 'completed', result = ?, completed_at = ? WHERE id = ? AND status = 'pending'`,
+    [resultJson, now, id]
+  );
+  return dbResult.changes > 0;
+}
+
+// Mark a command as failed with error
+function failCommand(id: string, error: string) {
+  const now = Date.now();
+  const dbResult = db.run(
+    `UPDATE commands SET status = 'failed', error = ?, completed_at = ? WHERE id = ? AND status = 'pending'`,
+    [error, now, id]
+  );
+  return dbResult.changes > 0;
+}
+
+// Clean up old completed/failed commands (older than MAX_AGE_MS)
+setInterval(() => {
+  const cutoff = Date.now() - MAX_AGE_MS;
+  const result = db.run(`DELETE FROM commands WHERE status != 'pending' AND completed_at < ?`, [cutoff]);
+  if (result.changes > 0) {
+    console.log(`[sidetrack] Pruned ${result.changes} old commands`);
+  }
+}, PRUNE_INTERVAL_MS);
 
 // HTTP Server
 const server = Bun.serve({
@@ -325,6 +490,71 @@ const server = Bun.serve({
       return new Response(JSON.stringify({ ok: deleted }), { headers });
     }
     
+    // POST /commands - submit a command for execution
+    if (req.method === "POST" && url.pathname === "/commands") {
+      try {
+        const body = await req.json() as { name: string; args?: unknown[] };
+        
+        if (!body.name || typeof body.name !== 'string') {
+          return new Response(JSON.stringify({ ok: false, error: 'name is required' }), { 
+            status: 400, 
+            headers 
+          });
+        }
+        
+        const id = submitCommand(body.name, body.args || []);
+        return new Response(JSON.stringify({ ok: true, id }), { headers });
+      } catch (e) {
+        return new Response(JSON.stringify({ ok: false, error: String(e) }), { 
+          status: 400, 
+          headers 
+        });
+      }
+    }
+    
+    // GET /commands/pending - get pending commands (for clients to poll)
+    if (req.method === "GET" && url.pathname === "/commands/pending") {
+      const commands = getPendingCommands();
+      return new Response(JSON.stringify(commands), { headers });
+    }
+    
+    // GET /commands/:id - get command status
+    if (req.method === "GET" && url.pathname.startsWith("/commands/") && url.pathname !== "/commands/pending") {
+      const id = url.pathname.split("/")[2];
+      const cmd = getCommand(id);
+      
+      if (!cmd) {
+        return new Response(JSON.stringify({ ok: false, error: 'command not found' }), { 
+          status: 404, 
+          headers 
+        });
+      }
+      
+      return new Response(JSON.stringify(cmd), { headers });
+    }
+    
+    // POST /commands/:id/result - submit command result
+    if (req.method === "POST" && url.pathname.match(/^\/commands\/[^/]+\/result$/)) {
+      const id = url.pathname.split("/")[2];
+      
+      try {
+        const body = await req.json() as { result?: unknown; error?: string };
+        
+        if (body.error) {
+          const ok = failCommand(id, body.error);
+          return new Response(JSON.stringify({ ok }), { headers });
+        } else {
+          const ok = completeCommand(id, body.result);
+          return new Response(JSON.stringify({ ok }), { headers });
+        }
+      } catch (e) {
+        return new Response(JSON.stringify({ ok: false, error: String(e) }), { 
+          status: 400, 
+          headers 
+        });
+      }
+    }
+    
     // GET /stats - basic stats
     if (req.method === "GET" && url.pathname === "/stats") {
       const count = db.query(`SELECT COUNT(*) as count FROM events`).get() as { count: number };
@@ -369,7 +599,14 @@ const server = Bun.serve({
   }
   
   function ctx() {
-    return { url: window.location.href, title: document.title, ts: Date.now() };
+    return {
+      url: window.location.href,
+      origin: window.location.origin,
+      hostname: window.location.hostname,
+      title: document.title,
+      _ts: Date.now(),
+      _runtime: 'browser'
+    };
   }
   
   function serialize(args) {
@@ -390,14 +627,14 @@ const server = Bun.serve({
     const orig = console[method].bind(console);
     console[method] = function(...args) {
       orig(...args);
-      buffer.push({ type: 'console.' + method, args: serialize(args), ...ctx() });
+      buffer.push({ _type: 'console.' + method, args: serialize(args), ...ctx() });
       scheduleFlush();
     };
   });
   
   window.addEventListener('error', e => {
     buffer.push({
-      type: 'window.error', message: e.message, filename: e.filename,
+      _type: 'error.uncaught', message: e.message, filename: e.filename,
       lineno: e.lineno, colno: e.colno,
       error: e.error ? { name: e.error.name, message: e.error.message, stack: e.error.stack } : null,
       ...ctx()
@@ -406,7 +643,7 @@ const server = Bun.serve({
   });
   
   window.addEventListener('unhandledrejection', e => {
-    buffer.push({ type: 'unhandledrejection', reason: String(e.reason), ...ctx() });
+    buffer.push({ _type: 'error.unhandledrejection', reason: String(e.reason), ...ctx() });
     scheduleFlush();
   });
   
@@ -496,7 +733,11 @@ GET /recent
     ?limit=100        Max events to return (default: 100)
     ?_type=X          Filter by event type (e.g., console.error, fetch.request)
     ?_runtime=X       Filter by runtime (browser, node, bun, deno, worker)
-    ?anyField=value   Filter by any field in the event data
+    ?anyField=value   Filter by any field in the event data (exact match)
+    ?key!=value       Negation: field is not equal to value (or missing)
+    ?key~=value       Substring: field contains value
+  All filters are combined as AND. Example:
+    ?_type!=sidetrack.heartbeat&url~=/api/&limit=50
 
 GET /search?q=term
   Full-text search across event data
@@ -556,6 +797,8 @@ EXAMPLES
 curl http://localhost:${PORT}/recent?limit=10
 curl http://localhost:${PORT}/recent?_type=console.error
 curl http://localhost:${PORT}/recent?_runtime=bun
+curl "http://localhost:${PORT}/recent?_type!=sidetrack.heartbeat"
+curl "http://localhost:${PORT}/recent?url~=/api/&limit=20"
 curl http://localhost:${PORT}/search?q=error
 curl http://localhost:${PORT}/stats
 `;
@@ -581,9 +824,15 @@ curl http://localhost:${PORT}/stats
   }
 });
 
+// Show startup info
+const config = findConfig();
+const portSource = process.env.PORT ? 'PORT env' : config ? '.sidetrack/config.json' : 'default';
+
 console.log(`
 ╔═══════════════════════════════════════════════════╗
 ║           6digit-sidetrack is running             ║
+║                                                   ║
+║   Port:    ${PORT} (from ${portSource.padEnd(22)}) ║
 ║                                                   ║
 ║   Ingest:  POST http://localhost:${PORT}/events     ║
 ║   Query:   GET  http://localhost:${PORT}/recent     ║
