@@ -11,7 +11,10 @@
 import { Database } from "bun:sqlite";
 
 const PORT = 6274;
-const MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_AGE_MS = process.env.SIDETRACK_MAX_AGE_MS
+  ? Number(process.env.SIDETRACK_MAX_AGE_MS)
+  : 60 * 60 * 1000; // 1 hour default
+const RETENTION_MINUTES = Math.round(MAX_AGE_MS / 60000);
 const PRUNE_INTERVAL_MS = 30 * 1000; // prune every 30 seconds
 
 // SSE stream subscribers
@@ -478,7 +481,7 @@ const server = Bun.serve({
     // GET /help - API documentation
     if (url.pathname === "/help") {
       const helpText = `Sidetrack - Development Observability Sink
-Port: ${PORT} | Retention: 5 minutes
+Port: ${PORT} | Retention: ${RETENTION_MINUTES} minutes
 
 ENDPOINTS
 =========
@@ -587,6 +590,6 @@ console.log(`
 ║   Search:  GET  http://localhost:${PORT}/search?q=  ║
 ║   Stats:   GET  http://localhost:${PORT}/stats      ║
 ║                                                   ║
-║   Capturing last 5 minutes of events              ║
+║   Capturing last ${String(RETENTION_MINUTES).padEnd(3)} minutes of events            ║
 ╚═══════════════════════════════════════════════════╝
 `);

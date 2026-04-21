@@ -169,7 +169,7 @@ You now have direct visibility into runtime state. No more asking the human to c
 The developer's machine is powerful enough to handle a firehose of events. We capture everything and let the query layer (and AI assistants) filter down to what matters. This is not a production logging system - it's a development tool that maximizes observability while minimizing setup.
 
 - **Zero config** - Works immediately with sensible defaults
-- **5-minute retention** - Recent events only, keeps it fast
+- **1-hour retention** - Recent events only (configurable via `SIDETRACK_MAX_AGE_MS`), keeps it fast
 - **No schema** - Any JSON goes in, query by any field
 - **Development only** - Not for production, not for metrics - for traceability and visibility into running code
 
@@ -193,7 +193,7 @@ The developer's machine is powerful enough to handle a firehose of events. We ca
                │   Sidetrack Server    │
                │                       │
                │  SQLite (in-memory)   │
-               │  5-minute retention   │
+               │  1-hour retention     │
                └───────────┬───────────┘
                            │
                            ▼
