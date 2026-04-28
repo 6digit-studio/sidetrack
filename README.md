@@ -83,6 +83,8 @@ sidetrack init --port=6280
 
 All three projects now share the same observability backplane. Query from any of them and see the full picture.
 
+> **Or**, run a single sidetrack server and namespace each project with a tenant id — see [Tenants](#tenants) below.
+
 ## What Gets Captured
 
 Everything. By default. No configuration needed.
@@ -124,10 +126,48 @@ curl http://localhost:6274/help
 | `GET /search?q=term` | Full-text search |
 | `GET /stream` | Server-Sent Events stream of new events (`?pattern=regex` or `?cwd=/path`) |
 | `GET /stats` | Event count and time span |
+| `GET /tenants` | List distinct tenant ids currently in the data |
 | `GET /help` | API documentation |
 | `POST /commands` | Submit a command for a registered client to run (see Commands Backplane) |
 | `GET /commands/pending` | Pending commands (clients poll this) |
 | `GET /commands/:id` | Command status and result |
+
+Every read/write endpoint above can be prefixed with `/t/:tenant` to scope to a single tenant bucket — see [Tenants](#tenants).
+
+### Tenants
+
+A single sidetrack instance can serve many independent streams. Prefix any endpoint with `/t/:tenant` to scope it:
+
+```bash
+# Ingest into tenant "myproject"
+curl -X POST http://localhost:6274/t/myproject/events \
+  -H 'Content-Type: application/json' -d '{"_type":"hello"}'
+
+# Read just that tenant
+curl http://localhost:6274/t/myproject/recent
+curl http://localhost:6274/t/myproject/stream
+curl http://localhost:6274/t/myproject/stats
+
+# Or read across all tenants (legacy / unscoped paths)
+curl http://localhost:6274/recent      # union of every bucket
+curl http://localhost:6274/tenants     # list distinct tenant ids
+```
+
+**Rules:**
+- Tenant ids are case-insensitive and must match `[a-z0-9_-]+` (the literal string `_all` is reserved).
+- Omitting the `/t/:tenant` prefix on a write goes to the default (`null`) bucket — every legacy client keeps working unchanged.
+- Omitting the prefix on a read returns the **union** across all buckets.
+- Each event in a `/recent` response carries a `_tenant` field so you can see which bucket it came from.
+
+The browser inject script understands tenants too:
+
+```html
+<!-- ingests into tenant "myproject" -->
+<script src="http://localhost:6274/t/myproject/inject.js"></script>
+
+<!-- equivalent: -->
+<script src="http://localhost:6274/inject.js?t=myproject"></script>
+```
 
 ### Filtering
 
