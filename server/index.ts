@@ -11,11 +11,12 @@
 import { Database } from "bun:sqlite";
 import { existsSync, readFileSync } from "fs";
 import { join, dirname } from "path";
+import { startCdpListener } from "./cdp";
 
 const DEFAULT_PORT = 6274;
 
 // Walk up directory tree to find .sidetrack/config.json
-function findConfig(): { port: number } | null {
+function findConfig(): { port?: number; cdp_ports?: number[]; cdp_disabled?: boolean } | null {
   let dir = process.cwd();
   while (dir !== '/') {
     const configPath = join(dir, '.sidetrack', 'config.json');
@@ -974,6 +975,25 @@ curl http://localhost:${PORT}/tenants
 // Show startup info
 const config = findConfig();
 const portSource = process.env.PORT ? 'PORT env' : config ? '.sidetrack/config.json' : 'default';
+
+// CDP listener — second observability dimension. Captures renderer crashes,
+// real navigation events, JS heap / DOM counter pressure. Opt-out via
+// .sidetrack/config.json { "cdp_disabled": true } or env SIDETRACK_CDP_DISABLED=1.
+const cdpDisabled = process.env.SIDETRACK_CDP_DISABLED === '1' || config?.cdp_disabled === true;
+const cdpPorts = (() => {
+  if (process.env.SIDETRACK_CDP_PORTS) {
+    return process.env.SIDETRACK_CDP_PORTS.split(',').map((s) => parseInt(s.trim())).filter((n) => !isNaN(n));
+  }
+  if (config?.cdp_ports?.length) return config.cdp_ports;
+  return [9222, 9223]; // 9222 = default Chromium, 9223 = 6digit TV browser convention
+})();
+if (!cdpDisabled) {
+  startCdpListener(ingestEvents, {
+    ports: cdpPorts,
+    verbose: process.env.SIDETRACK_CDP_VERBOSE === '1'
+  });
+  console.log(`[sidetrack] CDP listener watching ports: ${cdpPorts.join(', ')}`);
+}
 
 console.log(`
 ╔═══════════════════════════════════════════════════╗
