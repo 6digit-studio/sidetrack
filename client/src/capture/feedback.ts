@@ -293,6 +293,7 @@ function injectStyles() {
       z-index: 1000000;
       opacity: 0;
       transition: opacity 0.2s;
+      pointer-events: none;
     }
     #sidetrack-feedback-toast.visible { opacity: 1; }
   `;
